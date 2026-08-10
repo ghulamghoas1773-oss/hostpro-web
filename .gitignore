@@ -1,0 +1,5 @@
+node_modules/
+.DS_Store
+.wrangler/
+__pycache__/
+public/index.html.previous
