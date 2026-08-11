@@ -529,6 +529,16 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
   <div class="panel" id="dMoneyPanel"><h2>Portfolio position</h2>
     <div class="desc">Bookings, refunds and expenses for the selected month, by owner.</div>
     <div class="scroll"><table id="dOwner"></table></div></div>
+
+  <!-- Lives on Overview because it is the one page everybody can reach.
+       It was on Settings, which is admin-only, so managers and staff had
+       no way to sign out at all. -->
+  <div class="panel"><h2>Your session</h2>
+    <div class="desc" id="whoInfo">—</div>
+    <div class="head" style="margin-top:6px">
+      <button class="btn btn--ghost btn--sm" id="btnOut">Sign out</button>
+    </div>
+  </div>
 </section>
 
 <!-- ═════ ISSUES ═════ -->
@@ -671,6 +681,10 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
 
 <!-- ═════ PERFORMANCE ═════ -->
 <section class="page" id="pg-perf">
+  <div class="panel" id="rfPanel"><h2>Red flags</h2>
+    <div class="desc">Raised automatically — a task that passed its deadline unfinished, or a checklist
+      item not ticked by the end of the day. Nobody can add or remove one by hand.</div>
+    <div class="scroll"><table id="rfTbl"></table></div></div>
   <div class="panel panel__glow hidden" id="pfAdd"><h2>Log performance</h2>
     <div class="desc">Ratings feed the incentive figures and the monthly reviews.</div>
     <div class="grid g4">
@@ -923,14 +937,6 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
     <div class="head" style="margin:12px 0 0"><input class="search" id="lCat" placeholder="e.g. Electricity ⚡️">
       <button class="btn btn--ghost btn--sm" data-addlist="Categories">Add</button></div>
     <div id="tagCat" style="margin-top:14px"></div></div>
-  <!-- Sign out sits outside the workspace panel on purpose. That panel is
-       hidden below level 5, and it used to be the only way to sign out. -->
-  <div class="panel"><h2>Your session</h2>
-    <div class="desc" id="whoInfo">—</div>
-    <div class="head" style="margin-top:6px">
-      <button class="btn btn--ghost btn--sm" id="btnOut">Sign out</button>
-    </div>
-  </div>
   <div class="panel hidden" id="devPanel"><h2>This device</h2>
     <div class="desc" id="devInfo">—</div>
     <div class="head" style="margin-top:6px">
@@ -1160,11 +1166,15 @@ const NAV = [
   {id:'g-dash', label:'Overview', pages:[['dash','Overview']]},
   {id:'g-ops',  label:'Operations', pages:[['issues','Slack Issues',3],['tasks','Tasks'],
       ['check','Checklists'],['clock','Clock-in'],['guest','Guest Feedback',3]]},
-  {id:'g-team', label:'Team', min:3, pages:[['people','Directory'],['perf','Performance'],
+  /* Team and Admin are admin-only. A manager could previously browse
+     everyone's ratings, mistakes and the full directory — read-only, but
+     visible. Revenue stays at 3 because the server already narrows it to
+     the properties that manager covers. */
+  {id:'g-team', label:'Team', min:4, pages:[['people','Directory'],['perf','Performance'],
       ['mistakes','Mistakes'],['incentives','Incentives',4]]},
   {id:'g-money',label:'Revenue', min:3, pages:[['bookings','Bookings'],['expenses','Expenses'],
       ['refunds','Refunds'],['funds','Field Funds'],['reports','Reports',4]]},
-  {id:'g-admin',label:'Admin', min:3, pages:[['props','Properties'],['logins','Logins',5],['settings','Categories']]}
+  {id:'g-admin',label:'Admin', min:4, pages:[['props','Properties'],['logins','Logins',5],['settings','Categories']]}
 ];
 let curGroup='g-dash', curPage='dash';
 function buildNav(){
@@ -1274,6 +1284,11 @@ function statCards(el, cards){
 
 /* ══════════ OVERVIEW ══════════ */
 function renderDash(){
+  const inst = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  $('whoInfo').innerHTML = 'Signed in as <b>' + esc(ME.name) + '</b> (' + esc(ME.role) + '). ' +
+    (inst ? 'Running as an installed app.'
+          : 'Not installed yet — use your browser menu, then “Add to Home Screen” or “Install”.');
+
   const iss = T('Issues').filter(inM);
   const resp = iss.filter(i=>i.responded).length;
   const rate = iss.length ? Math.round(resp/iss.length*1000)/10 : null;
@@ -1602,16 +1617,33 @@ function renderClock(){
   statCards('ciStats', [['Clocked in today', todayN, todayN?'good':'warn'],
     ['Onsite roster', roster, ''],
     ['Logged this month', all.length, ''],
-    ['People tracked', Object.keys(all.reduce((a,c)=>{a[c.emp]=1;return a;},{})).length, '']]);
+    ['Late arrivals', all.filter(c=>Number(c.lateMins)>0).length,
+      all.filter(c=>Number(c.lateMins)>0).length ? 'bad' : 'good']]);
   fill($('ciWho'), [''].concat(everyone()));
   $('ciWho').options[0].text = 'Everyone'; $('ciWho').options[0].value = '';
   const f = $('ciWho').value;
   const rows = all.filter(c=>!f||c.emp===f)
     .sort((a,b)=>String(b.date+b.time).localeCompare(String(a.date+a.time)));
-  tbl('ciTbl', ['Date','Person','Role','Time',''],
-    rows.slice(0,300).map(c=>`<tr><td class="num">${esc(c.date)}</td><td>${esc(c.emp)}</td>
-      <td class="muted">${esc(c.role||'')}</td><td class="num">${esc(c.time)}</td>
-      <td>${can(4)?rm('ClockIns',c.id):''}</td></tr>`), 'No clock-ins this month.');
+  /* Late is measured against the start time an admin set for that person.
+     There is no grace: 08:01 against an 08:00 start is one minute late.
+     Someone with no start time set shows a dash rather than "on time",
+     because nothing was expected of them. */
+  const lateOf = c => (c.lateMins === '' || c.lateMins === null || c.lateMins === undefined)
+    ? null : Number(c.lateMins);
+  const lateCount = rows.filter(c => lateOf(c) > 0).length;
+  tbl('ciTbl', ['Date','Person','Role','Expected','Clocked in','Late by',''],
+    rows.slice(0,300).map(function(c){
+      const L = lateOf(c);
+      const cell = L === null ? '<span class="muted">—</span>'
+        : L > 0 ? `<span class="badge badge--bad">${L} min</span>`
+                : '<span class="badge badge--good">On time</span>';
+      return `<tr><td class="num">${esc(c.date)}</td><td>${esc(c.emp)}</td>
+      <td class="muted">${esc(c.role||'')}</td><td class="num muted">${esc(c.expected||'—')}</td>
+      <td class="num">${esc(c.time)}</td><td>${cell}</td>
+      <td>${can(4)?rm('ClockIns',c.id):''}</td></tr>`;
+    }), 'No clock-ins this month.');
+  const lateStat = document.getElementById('ciLate');
+  if(lateStat) lateStat.textContent = lateCount;
 }
 $('ciNow').onclick = async () => {
   setSync('sync','Clocking in');
@@ -1673,7 +1705,10 @@ function renderPeople(){
     .filter(p=>!fr||p.role===fr)
     .filter(p=>!ts.length||hit(ts, hay(p.name,p.role,p.title,p.org,p.contact,propsOf(p.id).join(' '))))
     .sort((a,b)=>String(a.role).localeCompare(String(b.role))||String(a.name).localeCompare(String(b.name)));
-  tbl('peTbl', ['Name','Access','Title','Covers / reports to','Contact','Status',''],
+  /* Starts at is the time this person is expected to clock in. Admins and
+     the primary account set it; everyone else sees it as text. Leave it
+     blank and nothing is expected of them, so they can never be late. */
+  tbl('peTbl', ['Name','Access','Title','Covers / reports to','Contact','Starts at','Status',''],
     rows.map(function(p){
       const covers = p.role === 'Manager'
         ? (propsOf(p.id).slice(0,4).join(', ') + (propsOf(p.id).length>4?' +'+(propsOf(p.id).length-4):'') || '—')
@@ -1682,6 +1717,10 @@ function renderPeople(){
         <td class="muted">${esc(p.title||p.position||'—')}</td>
         <td class="muted" style="max-width:280px">${esc(covers)}</td>
         <td class="muted">${esc(p.contact||'—')}</td>
+        <td>${can(4)
+          ? `<input class="inline" type="time" style="width:110px" data-t="People" data-id="${p.id}"
+               data-f="shiftStart" value="${esc(p.shiftStart||'')}">`
+          : `<span class="muted">${esc(p.shiftStart||'—')}</span>`}</td>
         <td>${can(4)?sel('People',p.id,'status',['Active','Training','Inactive'],p.status):pill(p.status)}</td>
         <td>${can(4)?rm('People',p.id):''}</td></tr>`;
     }), 'Nobody matches.');
@@ -1707,6 +1746,31 @@ $('peFilter').addEventListener('change', renderPeople);
 const RATING_SCORE = {Excellent:5, Good:4, Average:3, 'Below Average':2, Poor:1};
 function renderPerf(){
   $('pfAdd').classList.toggle('hidden', !canW('Performance'));
+
+  /* Red flags for the month, worst offender first. Managers only ever
+     receive their own — the server filters the table before it is sent. */
+  const flags = T('RedFlags').filter(inM);
+  const byEmp = {};
+  flags.forEach(function(f){ (byEmp[f.emp] = byEmp[f.emp] || []).push(f); });
+  const names = Object.keys(byEmp).sort(function(a,b){ return byEmp[b].length - byEmp[a].length; });
+  if(!flags.length){
+    $('rfTbl').innerHTML = `<tr><td class="muted">No red flags this month${
+      can(4) ? '' : ' — nothing outstanding against you.'}</td></tr>`;
+  } else {
+    let h = `<tr><th>Person</th><th>Flags</th><th>What happened</th><th>Deadline</th><th>Raised</th></tr>`;
+    names.forEach(function(n){
+      const list = byEmp[n].slice().sort(function(a,b){ return String(b.due).localeCompare(String(a.due)); });
+      h += `<tr class="grouped"><td class="strong">${esc(n)}</td>
+            <td><span class="badge badge--bad">${list.length}</span></td><td colspan="3"></td></tr>`;
+      list.forEach(function(f){
+        h += `<tr><td></td><td class="muted">${esc(f.kind)}</td>
+              <td>${esc(f.detail||'')}</td><td class="muted">${esc(f.due||'')}</td>
+              <td class="muted">${esc(f.date||'')}</td></tr>`;
+      });
+    });
+    $('rfTbl').innerHTML = h;
+  }
+
   const all = T('Performance').filter(inM);
   const by = {};
   all.forEach(function(p){ if(!by[p.emp]) by[p.emp] = {n:0, sum:0, low:0};
@@ -2124,13 +2188,8 @@ function renderSettings(){
   $('tagCat').innerHTML  = tagRow('Categories', D.categories||[]);
   const installed = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
 
-  /* Everyone sees who they are and how to install. Only the primary
-     account sees the workspace itself — the link, the backup, the Slack
-     pull and the diagnostics. */
-  $('whoInfo').innerHTML = 'Signed in as <b>' + esc(ME.name) + '</b> (' + esc(ME.role) + '). ' +
-    (installed ? 'Running as an installed app.'
-               : 'Not installed yet — use your browser menu, then “Add to Home Screen” or “Install”.');
-
+  /* Only the primary account sees the workspace itself — the link, the
+     backup, the Slack pull and the diagnostics. */
   $('devPanel').classList.toggle('hidden', !can(PRIMARY));
   if(!can(PRIMARY)) return;
   $('devInfo').innerHTML = 'Signed in as <b>' + esc(ME.name) + '</b> (' + esc(ME.role) + '). ' +
