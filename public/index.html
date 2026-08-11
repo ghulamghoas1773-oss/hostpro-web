@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#000000">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="HostPro OS">
+<meta name="apple-mobile-web-app-title" content="HostPro">
 <link rel="manifest" href="manifest.webmanifest" id="pwaManifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -273,6 +273,137 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
   .panel{padding:18px}
 }
 </style>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     MOBILE FIT — added 11 Aug 2026
+     Additive and self-contained. Delete this whole <style> element and
+     the app returns exactly to how it behaved before. No markup, no
+     logic and no class name changes.
+
+     THE PROBLEM IT SOLVES
+     The header could not shrink. .nav__right held the sync label and the
+     who pill, both white-space:nowrap, next to a 159px logo. On a 390px
+     phone that chain measured 471px, so the page laid out 472px wide and
+     the phone had to be pinched out to see it.
+
+     That one overflow caused everything else. The browser widens the
+     layout viewport to the widest thing on the page, so @media rules were
+     being evaluated against 472px instead of 390px — which is why the
+     max-width:620px rules never fired, forms stayed two columns, and the
+     month picker sat off the right edge. Letting the header shrink fixes
+     the rest by itself.
+
+     RULE OF THUMB FOR ANYTHING ADDED LATER
+     If an element must not wrap, it also needs min-width:0 and a way to
+     truncate, or it becomes the new floor width for the whole app.
+     ══════════════════════════════════════════════════════════════════ -->
+<style id="mobileFit">
+
+/* ---------- 1. the fix: a header that is allowed to shrink ---------- */
+@media(max-width:760px){
+  html,body{max-width:100%;overflow-x:hidden}
+
+  .nav__in{gap:10px;padding:0 12px;min-width:0}
+  .logo{flex:0 0 auto;min-width:0}
+
+  /* Shrink before overflow, in this order: the name first, then the
+     sync label. The avatar and the status dot never shrink — they are
+     the two things that still read at a glance. */
+  .nav__right{flex:1 1 auto;min-width:0;justify-content:flex-end;gap:8px}
+  .sync{flex:0 1 auto;min-width:0;overflow:hidden}
+  #syncTxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .sync__dot{flex:0 0 auto}
+  .who{flex:0 1 auto;min-width:0;overflow:hidden;padding:5px 5px 5px 10px}
+  #whoName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .who__dot{flex:0 0 auto}
+}
+
+/* Below this width the wordmark and the sync label stop earning their
+   space. The monogram and the coloured dot carry the same meaning. */
+@media(max-width:620px){
+  .logo{font-size:0;gap:0}
+  .logo__mark{border-right:none;padding-right:0}
+}
+@media(max-width:430px){
+  #syncTxt{display:none}
+  .sync{gap:0}
+}
+
+/* ---------- 2. bottom tab bar: five tabs, any screen ---------- */
+@media(max-width:760px){
+  .nav__links{overflow-x:hidden;justify-content:space-around}
+  /* Size to the label rather than to an equal fifth, so nothing is
+     truncated at five tabs. min-width:0 is the safety net if a sixth
+     is ever added — it shortens instead of pushing the bar wider. */
+  .nav__links button{flex:0 1 auto;min-width:0;font-size:12px;padding:9px 6px;
+    overflow:hidden;text-overflow:ellipsis}
+}
+
+/* ---------- 3. the month picker comes first, not last ----------
+   It filters every screen in the app, so on a phone it leads the row
+   instead of being pushed past the right edge by the spacer. */
+@media(max-width:760px){
+  .subnav{padding:8px 12px}
+  .subnav__in{gap:6px}
+  .subnav .spacer{display:none}
+  .subnav button{white-space:nowrap;flex:0 0 auto}
+  .monthpick{order:-1;flex:0 0 auto}
+}
+
+/* ---------- 4. iOS: no zoom when a field is tapped ----------
+   Safari zooms into any focused field under 16px and does not zoom back
+   out. Every input on a phone is 16px for that one reason. */
+@media(max-width:760px){
+  .f input,.f select,.f textarea,.search,select.pick,.inline,.monthpick,
+  input,select,textarea{font-size:16px}
+  .search{min-width:0;width:100%;max-width:none}
+  .f input,.f select,.f textarea{padding:12px 13px}
+}
+
+/* ---------- 4b. one form field per row on a phone ----------
+   This is what the existing 620px rule already intended, done with flex
+   instead of a 1fr grid track. A grid track will not shrink below the
+   widest thing inside it, and a <select> is as wide as its longest
+   option — "Payment proof not received" was holding the booking form
+   open and pushing fields past the right edge. A stacked flex column
+   cannot be pushed out of shape by a long option. Nothing is truncated;
+   each select still opens at full width when tapped. */
+@media(max-width:760px){
+  .grid{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .grid > *{width:100%;min-width:0}
+  .f{min-width:0}
+  .f input,.f select,.f textarea{min-width:0;max-width:100%;width:100%}
+}
+
+/* ---------- 5. wide tables stay swipeable, and stay put ----------
+   Tables were already inside .scroll and were never the cause of the
+   zoom. This only stops a sideways swipe on a table from dragging the
+   page with it. */
+@media(max-width:760px){
+  .scroll{-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+  th,td{padding-left:9px;padding-right:9px}
+}
+
+/* ---------- 6. panels, modals and touch targets ---------- */
+@media(max-width:760px){
+  .panel{padding:16px;border-radius:14px}
+  .modal{padding:12px}
+  .modal__box{padding:18px;border-radius:14px}
+  .gate__card{padding:28px 22px}
+  .mini{padding:6px 9px}
+  .btn{min-height:40px}
+  .stats{gap:10px}
+}
+
+/* ---------- 7. iPhone home-screen installs ----------
+   html.native is set by Capacitor only, so a PWA added to the iPhone
+   home screen got no safe-area padding and the header sat under the
+   Dynamic Island. Same treatment, keyed off the display mode instead. */
+@media all and (display-mode:standalone){
+  .nav{padding-top:env(safe-area-inset-top)}
+  .subnav{top:calc(var(--nav-h) + env(safe-area-inset-top))}
+}
+</style>
 </head>
 <body>
 
@@ -525,7 +656,8 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
       <div class="f"><label>Contact</label><input id="peContact"></div>
       <div class="f"><label>Base salary</label><input id="peSalary" type="number" min="0"></div>
       <div class="f"><label>Currency</label><select id="peCur"><option>GHS</option><option>PKR</option><option>USD</option></select></div>
-      <div class="f"><label>Password</label><input id="pePw" placeholder="Their sign-in password"></div>
+      <div class="f hidden" id="pePwWrap"><label>Password</label><input id="pePw" placeholder="Their sign-in password"></div>
+      <div class="f hidden" id="peNoPw"><label>Password</label><div class="hint" style="margin-top:0">Set from Admin › Logins by the HostPro account once they are added.</div></div>
       <div class="f"><label>Holds field funds?</label><select id="peFund"><option value="">No</option><option value="Yes">Yes</option></select></div>
     </div>
     <div style="margin-top:18px"><button class="btn btn--primary" id="peSave">Add to the team</button></div>
@@ -791,14 +923,21 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
     <div class="head" style="margin:12px 0 0"><input class="search" id="lCat" placeholder="e.g. Electricity ⚡️">
       <button class="btn btn--ghost btn--sm" data-addlist="Categories">Add</button></div>
     <div id="tagCat" style="margin-top:14px"></div></div>
-  <div class="panel"><h2>This device</h2>
+  <!-- Sign out sits outside the workspace panel on purpose. That panel is
+       hidden below level 5, and it used to be the only way to sign out. -->
+  <div class="panel"><h2>Your session</h2>
+    <div class="desc" id="whoInfo">—</div>
+    <div class="head" style="margin-top:6px">
+      <button class="btn btn--ghost btn--sm" id="btnOut">Sign out</button>
+    </div>
+  </div>
+  <div class="panel hidden" id="devPanel"><h2>This device</h2>
     <div class="desc" id="devInfo">—</div>
     <div class="head" style="margin-top:6px">
       <button class="btn btn--ghost btn--sm" id="btnBackup">Download a full backup</button>
       <button class="btn btn--ghost btn--sm" id="btnSlack">Pull Slack now</button>
       <button class="btn btn--ghost btn--sm" id="btnServer">Change workspace link</button>
       <button class="btn btn--ghost btn--sm" id="btnDiag">Run diagnostics</button>
-      <button class="btn btn--ghost btn--sm" id="btnOut">Sign out</button>
     </div>
     <pre id="diagOut" class="hidden" style="margin-top:16px;background:#0e0e10;border:1px solid var(--line-strong);
       border-radius:8px;padding:14px;font-size:12.5px;line-height:1.7;color:#d8d8d8;white-space:pre-wrap;
@@ -856,9 +995,17 @@ function toast(m, ms){ const t=$('toast'); t.textContent=m; t.classList.add('on'
 
 let AUTH=null, ME=null, D=null, REV=-1, curMonth='all', busy=false, maskPw=true;
 const PROOF_YES='Payment proof received', PROOF_NO='Payment proof not received';
-const WRITE = {People:4,Owners:4,Properties:4,Checklist:4,Incentives:4,ClockIns:4,
-  Tasks:3,Issues:3,Performance:3,Mistakes:3,GuestFeedback:3,
-  Income:3,Expenses:3,Refunds:4,Funds:4,CheckDone:1};
+/* Mirrors WRITE_TIER in Code.gs. Keep the two in step — this one only
+   decides what a button looks like; the server decides what happens. */
+const WRITE = {People:5,Owners:4,Properties:4,Checklist:4,Incentives:4,ClockIns:4,
+  Tasks:4,Issues:4,Performance:4,Mistakes:4,GuestFeedback:4,
+  Income:4,Expenses:4,Refunds:4,Funds:4,CheckDone:1};
+const PRIMARY = 5;
+/* An admin still manages the directory; only the password and the role
+   are out of reach, and both are handled on the server. */
+const canPeople = () => can(4);
+/* Roles that are not onsite staff, for the roster counts and pickers. */
+const TOPROLE = r => r === 'Admin' || r === 'HostPro';
 const can  = lvl => !!ME && ME.level >= lvl;
 const canW = t => can(WRITE[t]||4);
 
@@ -870,7 +1017,17 @@ const HAS_GSR = (typeof google!=='undefined' && google.script && google.script.r
 /* The workspace this app talks to. Baked in so no one on the team is ever
    asked for a link — they open it and go straight to signing in. If you ever
    redeploy to a different script, change it here. */
-const BAKED_URL = 'https://script.google.com/macros/s/AKfycbyC_sOt3Btj-8vnNIT2X_nTqUbm6x0QVkVC8t3GmwHdeOmrZOv8SBDdI03fpyDLklIJsg/exec';
+const GS_EXEC_URL = 'https://script.google.com/macros/s/AKfycbyC_sOt3Btj-8vnNIT2X_nTqUbm6x0QVkVC8t3GmwHdeOmrZOv8SBDdI03fpyDLklIJsg/exec';
+/* Where the app sends its API calls.
+   Installed Android shell -> straight to Apps Script, because Capacitor
+     makes the request natively and there is no origin to share.
+   Anywhere else (Cloudflare, a laptop, an iPhone home screen) -> the
+     same-origin proxy at /api/exec, so no CORS question ever arises.
+   Served by Apps Script itself -> neither is used; google.script.run
+     takes over and API_URL is ignored. */
+const IS_NATIVE_SHELL = !!(window.Capacitor && window.Capacitor.isNativePlatform
+  && window.Capacitor.isNativePlatform());
+const BAKED_URL = IS_NATIVE_SHELL ? GS_EXEC_URL : '/api/exec';
 let API_URL = '';
 try{ API_URL = localStorage.getItem('hostpro_srv') || ''; }catch(e){}
 if(!API_URL && BAKED_URL) API_URL = BAKED_URL;
@@ -966,10 +1123,10 @@ async function loadNames(){
   try{
     const r = await call('apiWhoCanSignIn');
     if(r && r.ok){
-      const groups = {Admin:[], Manager:[], Staff:[]};
+      const groups = {HostPro:[], Admin:[], Manager:[], Staff:[]};
       r.people.forEach(p => { (groups[p.role] || groups.Staff).push(p.name); });
-      const label = {Admin:'HostPro & owners', Manager:'Onsite managers', Staff:'Onsite team'};
-      $('inUser').innerHTML = ['Admin','Manager','Staff'].filter(k=>groups[k].length)
+      const label = {HostPro:'Primary account', Admin:'HostPro & owners', Manager:'Onsite managers', Staff:'Onsite team'};
+      $('inUser').innerHTML = ['HostPro','Admin','Manager','Staff'].filter(k=>groups[k].length)
         .map(k => `<optgroup label="${label[k]}">` +
           groups[k].map(n=>`<option>${esc(n)}</option>`).join('') + '</optgroup>').join('');
     } else $('inErr').textContent = (r && r.error) || 'Could not load the sign-in list.';
@@ -1007,7 +1164,7 @@ const NAV = [
       ['mistakes','Mistakes'],['incentives','Incentives',4]]},
   {id:'g-money',label:'Revenue', min:3, pages:[['bookings','Bookings'],['expenses','Expenses'],
       ['refunds','Refunds'],['funds','Field Funds'],['reports','Reports',4]]},
-  {id:'g-admin',label:'Admin', min:3, pages:[['props','Properties'],['logins','Logins',4],['settings','Categories']]}
+  {id:'g-admin',label:'Admin', min:3, pages:[['props','Properties'],['logins','Logins',5],['settings','Categories']]}
 ];
 let curGroup='g-dash', curPage='dash';
 function buildNav(){
@@ -1051,7 +1208,7 @@ const ownerOf  = pid => { const p = propById(pid); return p ? ownerById(p.ownerI
 const everyone = () => T('People').filter(p=>p.status!=='Inactive').map(p=>p.name).sort();
 const managers = () => T('People').filter(p=>p.role==='Manager');
 const holders  = () => T('People').filter(p=>String(p.fundHolder).toLowerCase()==='yes'||p.role==='Manager');
-const fieldTeam= () => T('People').filter(p=>p.role!=='Admin'&&p.status!=='Inactive').map(p=>p.name).sort();
+const fieldTeam= () => T('People').filter(p=>!TOPROLE(p.role)&&p.status!=='Inactive').map(p=>p.name).sort();
 const refundsOf= id => T('Refunds').filter(r=>r.incomeId===id);
 const refunded = id => refundsOf(id).reduce((s,r)=>s+(Number(r.amount)||0),0);
 const isDirect = c => /direct|whatsapp|instagram/i.test(String(c||''));
@@ -1063,7 +1220,7 @@ function hit(ts,h){ return ts.every(t=>h.indexOf(t)>-1); }
 const PILL = {Pending:'warn','In Progress':'info',Done:'good',Open:'bad',Acknowledged:'warn',
   Resolved:'good',Major:'bad',Moderate:'warn',Minor:'flat',Excellent:'good',Good:'good',
   Average:'flat','Below Average':'warn',Poor:'bad',Active:'good',Training:'warn',Inactive:'flat',
-  Bonus:'good',Deduction:'bad',Admin:'accent',Manager:'info',Staff:'flat'};
+  Bonus:'good',Deduction:'bad',HostPro:'accent',Admin:'accent',Manager:'info',Staff:'flat'};
 const pill = s => `<span class="pill pill--${PILL[s]||'flat'}">${esc(s)}</span>`;
 const priPill = p => `<span class="pill pill--${String(p).indexOf('P1')===0?'bad':String(p).indexOf('P2')===0?'warn':'flat'}">${esc(p)}</span>`;
 const sel = (t,id,f,opts,cur) => `<select class="inline" data-t="${t}" data-id="${id}" data-f="${f}">` +
@@ -1128,7 +1285,7 @@ function renderDash(){
     ['Unanswered 24h+', stale.length, stale.length?'bad':'good'],
     ['Open tasks', openTasks.length, openTasks.length?'warn':'good'],
     ['Properties', T('Properties').length, ''],
-    ['Onsite team', T('People').filter(p=>p.role!=='Admin'&&p.status==='Active').length, '']
+    ['Onsite team', T('People').filter(p=>!TOPROLE(p.role)&&p.status==='Active').length, '']
   ];
   if(can(3)){
     const inc = T('Income').filter(inM), exp = T('Expenses').filter(inM), rf = T('Refunds').filter(inM);
@@ -1327,7 +1484,7 @@ function renderIssues(){
         <td>${esc(i.property)}</td><td class="strong">${esc(i.manager||'—')}</td>
         <td style="max-width:340px">${esc(i.text)}</td><td>${esc(i.category)}</td>
         <td>${pill(i.severity)}</td><td>${reply}</td>
-        <td>${canW('Issues')?sel('Issues',i.id,'status',['Open','Acknowledged','Resolved'],i.status):pill(i.status)}</td>
+        <td>${(canW('Issues')||ME.level===3)?sel('Issues',i.id,'status',['Open','Acknowledged','Resolved'],i.status):pill(i.status)}</td>
         <td>${can(4)?rm('Issues',i.id):''}</td></tr>`;
     }), 'No issues match these filters in ' + monthLabel(curMonth) + '.');
 }
@@ -1441,7 +1598,7 @@ function renderClock(){
     : 'You have not clocked in today.';
   $('ciNow').disabled = !!mineToday;
   const todayN = all.filter(c=>c.date===today).length;
-  const roster = T('People').filter(p=>p.role!=='Admin'&&p.status==='Active').length;
+  const roster = T('People').filter(p=>!TOPROLE(p.role)&&p.status==='Active').length;
   statCards('ciStats', [['Clocked in today', todayN, todayN?'good':'warn'],
     ['Onsite roster', roster, ''],
     ['Logged this month', all.length, ''],
@@ -1499,7 +1656,12 @@ $('gfSave').onclick = async () => {
 
 /* ══════════ DIRECTORY ══════════ */
 function renderPeople(){
-  $('peAdd').classList.toggle('hidden', !canW('People'));
+  $('peAdd').classList.toggle('hidden', !canPeople());
+  /* An admin adds the person; the HostPro account gives them a password
+     from Logins. The server blanks row.pw below level 5 either way, so
+     leaving the box visible would just be a lie. */
+  $('pePwWrap').classList.toggle('hidden', !can(PRIMARY));
+  $('peNoPw').classList.toggle('hidden', can(PRIMARY));
   const all = T('People');
   statCards('peStats', [['Admins', all.filter(p=>p.role==='Admin').length, ''],
     ['Onsite managers', all.filter(p=>p.role==='Manager').length, ''],
@@ -1613,7 +1775,7 @@ function renderIncentives(){
   if(!allowed) return;
   const all = T('Incentives').filter(inM);
   const by = {};
-  T('People').filter(p=>p.role!=='Admin').forEach(function(p){
+  T('People').filter(p=>!TOPROLE(p.role)).forEach(function(p){
     by[p.name] = {base:Number(p.salary)||0, cur:p.currency||'GHS', bonus:0, ded:0}; });
   all.forEach(function(x){
     const s = by[x.emp] = by[x.emp] || {base:0, cur:x.currency||'GHS', bonus:0, ded:0};
@@ -1914,7 +2076,7 @@ $('owSave').onclick = async () => {
 
 /* ══════════ LOGINS ══════════ */
 function renderLogins(){
-  const allowed = can(4);
+  const allowed = can(PRIMARY);
   $('lgWall').classList.toggle('hidden', allowed);
   $('lgBody').classList.toggle('hidden', !allowed);
   if(!allowed) return;
@@ -1926,14 +2088,21 @@ function renderLogins(){
       const detail = p.role==='Manager'
         ? (T('Properties').filter(x=>x.managerId===p.id).map(x=>x.name).slice(0,3).join(', ')||'no properties yet')
         : [p.title,p.org].filter(Boolean).join(' · ') || '—';
+      const isPrimary = p.role === 'HostPro';
       rows.push(`<tr><td class="strong">${esc(p.name)}</td><td class="muted">${esc(detail)}</td>
         <td>${pill(p.role)}</td>
-        <td>${sel('People',p.id,'role',['Admin','Manager','Staff'],p.role)}</td>
+        <td>${isPrimary ? '<span class="muted">Cannot be changed</span>'
+                        : sel('People',p.id,'role',['Admin','Manager','Staff'],p.role)}</td>
         <td><input class="inline" type="${maskPw?'password':'text'}" style="width:150px;font-family:ui-monospace,monospace"
              data-t="People" data-id="${p.id}" data-f="pw" value="${esc(p.pw||'')}" placeholder="set a password"></td>
-        <td>${rm('People',p.id)}</td></tr>`);
+        <td>${isPrimary ? '' : rm('People',p.id)}</td></tr>`);
     });
   };
+  /* The primary account goes first and its role is fixed. Demoting it —
+     or deleting it — would leave nobody able to reach this screen, and
+     the only way back would be the Apps Script editor. The server blocks
+     both as well; this just stops anyone trying. */
+  group('Primary account', T('People').filter(p=>p.role==='HostPro'));
   group('HostPro & owners', T('People').filter(p=>p.role==='Admin'));
   group('Onsite managers', T('People').filter(p=>p.role==='Manager'));
   group('Onsite team',     T('People').filter(p=>p.role==='Staff'));
@@ -1954,6 +2123,16 @@ function renderSettings(){
   $('tagPay').innerHTML  = tagRow('PayChannels', D.payChannels||[]);
   $('tagCat').innerHTML  = tagRow('Categories', D.categories||[]);
   const installed = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+
+  /* Everyone sees who they are and how to install. Only the primary
+     account sees the workspace itself — the link, the backup, the Slack
+     pull and the diagnostics. */
+  $('whoInfo').innerHTML = 'Signed in as <b>' + esc(ME.name) + '</b> (' + esc(ME.role) + '). ' +
+    (installed ? 'Running as an installed app.'
+               : 'Not installed yet — use your browser menu, then “Add to Home Screen” or “Install”.');
+
+  $('devPanel').classList.toggle('hidden', !can(PRIMARY));
+  if(!can(PRIMARY)) return;
   $('devInfo').innerHTML = 'Signed in as <b>' + esc(ME.name) + '</b> (' + esc(ME.role) + '). ' +
     (HAS_GSR ? 'Opened from Apps Script.' : 'Connected to ' + esc(API_URL.split('://').pop().slice(0,46)) + '…') +
     (installed ? ' Running as an installed app.' : ' Not installed yet — use your browser menu, then “Add to Home Screen” or “Install”.');
@@ -2309,7 +2488,7 @@ $('repPack').onclick = function(){
   const PAY = [['PERSON','BASE','BONUSES','DEDUCTIONS','NET','CURRENCY']];
   if(can(4)){
     const by = {};
-    T('People').filter(p=>p.role!=='Admin').forEach(p=>by[p.name]={base:Number(p.salary)||0,cur:p.currency||'GHS',bonus:0,ded:0});
+    T('People').filter(p=>!TOPROLE(p.role)).forEach(p=>by[p.name]={base:Number(p.salary)||0,cur:p.currency||'GHS',bonus:0,ded:0});
     T('Incentives').filter(inM).forEach(function(x){
       const s = by[x.emp] = by[x.emp] || {base:0,cur:'GHS',bonus:0,ded:0};
       if(x.type==='Bonus') s.bonus += Number(x.amount)||0; else s.ded += Number(x.amount)||0; });
