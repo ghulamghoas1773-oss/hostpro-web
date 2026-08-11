@@ -324,9 +324,14 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
   .logo{font-size:0;gap:0}
   .logo__mark{border-right:none;padding-right:0}
 }
+/* The label used to be hidden entirely on narrow phones, which left a
+   bare coloured dot and no way to tell syncing from offline. It now
+   shrinks and truncates instead — setSync also sets a short form of the
+   text for exactly this width. */
 @media(max-width:430px){
-  #syncTxt{display:none}
-  .sync{gap:0}
+  #syncTxt{font-size:11px;max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .who{max-width:118px}
+  .sync{gap:5px}
 }
 
 /* ---------- 2. bottom tab bar: five tabs, any screen ---------- */
@@ -790,6 +795,9 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
       <select class="pick" id="bkChan"><option value="">All channels</option></select>
       <select class="pick" id="bkProof"><option value="">Any proof state</option>
         <option>Payment proof received</option><option>Payment proof not received</option></select>
+      <select class="pick" id="bkPay"><option value="">All payment channels</option></select>
+      <select class="pick" id="bkVer"><option value="">All statuses</option>
+        <option value="Yes">Verified</option><option value="No">Un-Verified</option></select>
       <button class="btn btn--ghost btn--sm" data-exp="Income">Export</button></div>
     <div class="scroll"><table id="bkTbl"></table></div></div>
   <div class="panel"><h2>Direct booking leaderboard</h2>
@@ -1049,7 +1057,20 @@ function call(fn){
 function setSync(state, msg){
   const el = $('sync');
   el.className = 'sync' + (state==='ok'?' sync--ok':state==='off'?' sync--off':'');
-  $('syncTxt').textContent = msg;
+  /* On a phone the full sentence has nowhere to go, so a short form is
+     shown instead — a bare coloured dot tells you nothing about whether
+     the app is saving, waiting or offline. The full text stays as the
+     tooltip and on anything wider. */
+  const short = /offline/i.test(msg) ? 'Offline'
+              : /saving/i.test(msg) ? 'Saving'
+              : /loading|starting/i.test(msg) ? 'Loading'
+              : /checking/i.test(msg) ? 'Checking'
+              : /no connection/i.test(msg) ? 'No signal'
+              : /synced/i.test(msg) ? msg.replace(/^Synced\s*/i,'').trim() || 'Synced'
+              : msg;
+  const t = $('syncTxt');
+  t.textContent = (window.innerWidth <= 430) ? short : msg;
+  t.title = msg;
 }
 
 /* ---------- pull / save ---------- */
@@ -1080,12 +1101,39 @@ async function poll(){
 }
 /** Saves are confirmed by the Sheet before the screen updates, so what you
     see is always what your teammates will see. */
+/* Apply the server's own copy of a row to the table we already hold,
+   rather than re-downloading all sixteen tables to see one change.
+
+   Saving used to cost two round trips: the save itself, then a full pull
+   of every table — hundreds of income rows included — just to redraw one
+   edit. On a phone that was the ten seconds. The server hands back the
+   finished row, stamped and totalled, so it is applied locally and the
+   screen redraws at once. The next poll reconciles anything a colleague
+   changed in the meantime. */
+function applyRow(table, row){
+  if(!row || !D || !Array.isArray(D[table])) return false;
+  const i = D[table].findIndex(r => r.id === row.id);
+  if(i > -1) D[table][i] = row; else D[table].push(row);
+  try{ localStorage.setItem('hostpro_cache', JSON.stringify(D)); }catch(e){}
+  return true;
+}
+function dropRow(table, id){
+  if(!D || !Array.isArray(D[table])) return false;
+  const i = D[table].findIndex(r => r.id === id);
+  if(i > -1) D[table].splice(i, 1);
+  try{ localStorage.setItem('hostpro_cache', JSON.stringify(D)); }catch(e){}
+  return true;
+}
 async function save(table, row, msg){
   setSync('sync','Saving');
   try{
     const r = await call('apiSave', AUTH, table, row);
     if(!r || !r.ok){ toast('Not saved — ' + ((r&&r.error)||'no response'), 6000); setSync('off','Save failed'); return null; }
-    REV = r.rev; await pull(true);
+    REV = r.rev;
+    /* Only fall back to a full pull if the local copy could not be
+       updated — a fresh session, say, where D is not populated yet. */
+    if(applyRow(table, r.row)){ buildNav(); renderAll(); setSync('ok','Synced ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})); }
+    else await pull(true);
     if(msg) toast(msg);
     return r.row;
   }catch(e){ toast('Not saved — no connection to the workspace.', 6000); setSync('off','Offline'); return null; }
@@ -1096,7 +1144,10 @@ async function del(table, id, confirmMsg){
   try{
     const r = await call('apiDelete', AUTH, table, id);
     if(!r || !r.ok){ toast('Not removed — ' + ((r&&r.error)||'no response'), 6000); setSync('off','Failed'); return false; }
-    REV = r.rev; await pull(true); toast('Removed.'); return true;
+    REV = r.rev;
+    if(dropRow(table, id)){ buildNav(); renderAll(); setSync('ok','Synced ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})); }
+    else await pull(true);
+    toast('Removed.'); return true;
   }catch(e){ toast('Not removed — no connection.', 6000); return false; }
 }
 
@@ -1244,6 +1295,14 @@ const rm = (t,id) => `<button class="mini mini--danger" data-del="${t}" data-id=
 function fill(el, arr, def){ if(!el) return; const cur = el.value;
   el.innerHTML = arr.map(x=>`<option>${esc(x)}</option>`).join('');
   if(arr.indexOf(cur)>-1) el.value = cur; else if(def && arr.indexOf(def)>-1) el.value = def; }
+/* A filter dropdown whose first entry means "no filter". Unlike fill, the
+   blank stays selected until the person picks something, and their choice
+   survives a re-render. */
+function keepPick(id, arr, blankLabel){ const el = $(id); if(!el) return;
+  const cur = el.value;
+  el.innerHTML = `<option value="">${esc(blankLabel)}</option>` +
+    arr.map(x=>`<option>${esc(x)}</option>`).join('');
+  if(cur && [].some.call(el.options, o=>o.value===cur)) el.value = cur; }
 function fillKV(el, arr, blank){ if(!el) return; const cur = el.value;
   el.innerHTML = (blank?`<option value="">${esc(blank)}</option>`:'') +
     arr.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
@@ -1884,11 +1943,15 @@ function recalcBooking(){
 $('bPay').addEventListener('change', recalcBooking);
 function renderBookings(){
   $('bkAdd').classList.toggle('hidden', !canW('Income'));
+  keepPick('bkPay', D.payChannels||[], 'All payment channels');
   const all = T('Income').filter(inM);
   const ts = terms('bkSearch'), fo = $('bkOwner').value, fc = $('bkChan').value, fp = $('bkProof').value;
+  const fpay = $('bkPay').value, fver = $('bkVer').value;
   const rows = all
     .filter(r=>{ if(!fo) return true; const o = ownerOf(r.propId); return o && o.id===fo; })
     .filter(r=>!fc||r.channel===fc).filter(r=>!fp||proofOf(r)===fp)
+    .filter(r=>!fpay||String(r.payChannel||'')===fpay)
+    .filter(r=>!fver||(fver==='Yes' ? String(r.verified)==='Yes' : String(r.verified)!=='Yes'))
     .filter(r=>{ if(!ts.length) return true;
       return hit(ts, hay(propName(r.propId), r.guest, r.bookingId, r.channel, r.payChannel, r.notes, r.bookedBy)); })
     .sort((a,b)=>String(a.checkIn).localeCompare(String(b.checkIn)));
@@ -1903,8 +1966,10 @@ function renderBookings(){
   $('bkUnlinked').classList.toggle('hidden', !unlinked);
   if(unlinked) $('bkUnlinked').innerHTML = `${unlinked} booking${unlinked>1?'s have':' has'} no property attached — ` +
     'mostly rows carried over from the old revenue log, where only a name was stored. Open one and pick its property so it counts toward the right owner.';
+  /* Status, Notes and Added by bring this in line with the old Rental
+     Ledger, where the team relied on all three. */
   tbl('bkTbl', ['Property','Guest','Channel','Closed by','Paid via','Check-in','Nights','#Income',
-      '#Stripe','#Total','Proof','#Refunded',''],
+      '#Stripe','#Total','Status','Proof','#Refunded','Notes','Added by',''],
     rows.map(function(r){ const p = propById(r.propId), sf = Number(r.stripeFee)||0, rr = refunded(r.id);
       const pf = proofOf(r);
       return `<tr><td>${p?esc(p.name):'<span class="pill pill--warn">no property</span>'}</td>
@@ -1914,8 +1979,12 @@ function renderBookings(){
         <td class="r num">$${fmt(r.income)}</td>
         <td class="r num" style="color:${sf?'var(--accent)':'inherit'}">${sf?'$'+fmt(sf):'—'}</td>
         <td class="r num strong">$${fmt(r.total)}</td>
+        <td><span class="pill pill--${String(r.verified)==='Yes'?'good':'warn'}">${
+          String(r.verified)==='Yes'?'Verified':'Un-Verified'}</span></td>
         <td><span class="pill pill--${pf===PROOF_YES?'good':'warn'}">${pf===PROOF_YES?'In':'Missing'}</span></td>
         <td class="r num" style="color:${rr?'var(--bad)':'inherit'}">${rr?'−$'+fmt(rr):'—'}</td>
+        <td class="muted" style="max-width:240px">${esc(r.notes||'—')}</td>
+        <td class="muted">${esc(r.by||'—')}</td>
         <td style="white-space:nowrap">${canW('Refunds')?`<button class="mini mini--go" data-refund="${r.id}">Refund</button>`:''}
           ${canW('Income')?`<button class="mini mini--go" data-editinc="${r.id}">Edit</button>`+rm('Income',r.id):''}</td></tr>`;
     }), 'No bookings match.');
