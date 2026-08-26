@@ -567,7 +567,12 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
     <div class="head"><h2>Reported issues</h2>
       <input class="search spacer" id="issSearch" placeholder="Search text, property, reporter…">
       <select class="pick" id="issMgr"><option value="">All managers</option></select>
-      <select class="pick" id="issStat"><option value="">Any status</option><option>Open</option><option>Acknowledged</option><option>Resolved</option></select>
+      <select class="pick" id="issState"><option value="">Open and closed</option><option>Open</option><option>Closed</option></select>
+      <select class="pick" id="issStat"><option value="">Any stage</option><option>Open</option>
+        <option>Acknowledged</option><option>Escalated</option><option>In Progress</option><option>Resolved</option></select>
+      <select class="pick" id="issOut"><option value="">Any outcome</option><option>Issue resolved</option>
+        <option>Relocated</option><option>Discount offered on future stay</option>
+        <option>Compensation</option><option>Refunded</option></select>
       <select class="pick" id="issSev"><option value="">Any severity</option><option>Major</option><option>Moderate</option><option>Minor</option></select>
       <button class="btn btn--ghost btn--sm" data-exp="Issues">Export</button></div>
     <div class="scroll"><table id="issTbl"></table></div></div>
@@ -988,6 +993,34 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
     <button class="btn btn--ghost" id="rfCancel">Cancel</button></div>
   <div class="err" id="rfErr"></div></div></div>
 
+<!-- Updating a reported issue. A modal rather than inline dropdowns in the
+     row because the four fields depend on each other — the outcome only
+     exists once the work is resolved — and because the people who actually
+     close these are on phones in a stairwell, not at a desk. -->
+<div id="mIss" class="modal hidden"><div class="modal__box" style="max-width:640px">
+  <h2 id="mIssTitle">Update issue</h2>
+  <div class="note" id="mIssSummary"></div>
+  <div class="grid g2">
+    <div class="f"><label>Is this issue open or closed?</label>
+      <select id="isState"><option>Open</option><option>Closed</option></select>
+      <div class="hint">Closed means the case is finished and needs nothing further.</div></div>
+    <div class="f" id="isStageWrap"><label>Where does it stand?</label>
+      <select id="isStage"><option>Open</option><option>Acknowledged</option><option>Escalated</option>
+        <option>In Progress</option><option>Resolved</option></select>
+      <div class="hint">“Open” means nobody has picked it up yet.</div></div>
+    <div class="f hidden" id="isOutWrap" style="grid-column:1/-1"><label>How was it resolved?</label>
+      <select id="isOut"><option value="">— pick one —</option>
+        <option>Issue resolved</option><option>Relocated</option>
+        <option>Discount offered on future stay</option><option>Compensation</option>
+        <option>Refunded</option></select></div>
+    <div class="f" style="grid-column:1/-1"><label>Notes</label>
+      <textarea id="isNotes" placeholder="What actually happened, what was done, and whether the guest was satisfied."></textarea>
+      <div class="hint" id="isWho"></div></div>
+  </div>
+  <div class="modal__foot"><button class="btn btn--primary" id="isSave">Save update</button>
+    <button class="btn btn--ghost" id="isCancel">Cancel</button></div>
+  <div class="err" id="isErr"></div></div></div>
+
 <div id="toast"></div>
 
 <script>
@@ -1223,7 +1256,12 @@ const NAV = [
      the properties that manager covers. */
   {id:'g-team', label:'Team', min:4, pages:[['people','Directory'],['perf','Performance'],
       ['mistakes','Mistakes'],['incentives','Incentives',4]]},
-  {id:'g-money',label:'Revenue', min:3, pages:[['bookings','Bookings'],['expenses','Expenses'],
+  /* Revenue is admin-only. It used to be level 3 with the server narrowing
+     each table to the properties that manager covered — they still saw the
+     money for their own cluster. Now they see none of it: no bookings, no
+     expenses, no refunds, and no field-fund flow. READ_TIER in Code.gs is
+     the real gate; this only decides whether the tab is drawn. */
+  {id:'g-money',label:'Revenue', min:4, pages:[['bookings','Bookings'],['expenses','Expenses'],
       ['refunds','Refunds'],['funds','Field Funds'],['reports','Reports',4]]},
   {id:'g-admin',label:'Admin', min:4, pages:[['props','Properties'],['logins','Logins',5],['settings','Categories']]}
 ];
@@ -1279,7 +1317,7 @@ function hay(){ return [].slice.call(arguments).map(x=>String(x==null?'':x)).joi
 function hit(ts,h){ return ts.every(t=>h.indexOf(t)>-1); }
 
 const PILL = {Pending:'warn','In Progress':'info',Done:'good',Open:'bad',Acknowledged:'warn',
-  Resolved:'good',Major:'bad',Moderate:'warn',Minor:'flat',Excellent:'good',Good:'good',
+  Escalated:'bad',Closed:'good',Resolved:'good',Major:'bad',Moderate:'warn',Minor:'flat',Excellent:'good',Good:'good',
   Average:'flat','Below Average':'warn',Poor:'bad',Active:'good',Training:'warn',Inactive:'flat',
   Bonus:'good',Deduction:'bad',HostPro:'accent',Admin:'accent',Manager:'info',Staff:'flat'};
 const pill = s => `<span class="pill pill--${PILL[s]||'flat'}">${esc(s)}</span>`;
@@ -1361,7 +1399,7 @@ function renderDash(){
     ['Properties', T('Properties').length, ''],
     ['Onsite team', T('People').filter(p=>!TOPROLE(p.role)&&p.status==='Active').length, '']
   ];
-  if(can(3)){
+  if(can(4)){
     const inc = T('Income').filter(inM), exp = T('Expenses').filter(inM), rf = T('Refunds').filter(inM);
     const ti = inc.reduce((s,r)=>s+(Number(r.total)||0),0);
     const te = exp.reduce((s,r)=>s+(Number(r.usd)||0),0);
@@ -1379,7 +1417,7 @@ function renderDash(){
     alerts.push('<div class="note note--warn">Slack has never synced. Add SLACK_BOT_TOKEN in Apps Script and run installTriggers.</div>');
   }
   if(stale.length) alerts.push(`<div class="note note--bad">${stale.length} issue${stale.length>1?'s have':' has'} gone over 24 hours with no reply from the person accountable.</div>`);
-  if(can(3)){
+  if(can(4)){
     const noProof = T('Income').filter(inM).filter(r=>proofOf(r)===PROOF_NO).length;
     if(noProof) alerts.push(`<div class="note">${noProof} booking${noProof>1?'s':''} this month still ${noProof>1?'have':'has'} no payment proof attached.</div>`);
   }
@@ -1421,8 +1459,8 @@ function renderDash(){
       <td class="r num">${byProp[p].major?'<span style="color:var(--bad);font-weight:600">'+byProp[p].major+'</span>':'0'}</td></tr>`),
     'No issues logged this month.');
 
-  $('dMoneyPanel').classList.toggle('hidden', !can(3));
-  if(can(3)) renderOwnerTable('dOwner');
+  $('dMoneyPanel').classList.toggle('hidden', !can(4));
+  if(can(4)) renderOwnerTable('dOwner');
 }
 function gradePill(r){
   return r>=80 ? '<span class="pill pill--good">Strong</span>'
@@ -1481,7 +1519,7 @@ function renderIssues(){
   const ms = all.filter(i=>i.responseMins!=null&&i.responseMins!==''&&Number(i.responseMins)>=0).map(i=>Number(i.responseMins));
   const avg = ms.length ? Math.round(ms.reduce((a,b)=>a+b,0)/ms.length) : null;
   const stale = all.filter(i=>!i.responded && ageMs(i)>864e5).length;
-  const major = all.filter(i=>i.severity==='Major' && i.status!=='Resolved').length;
+  const major = all.filter(i=>i.severity==='Major' && stateOf(i)!=='Closed').length;
   statCards('issStats', [
     ['Issues logged', all.length, ''], ['Responded', resp, 'good'],
     ['Response rate', rate+'%', rate>=70?'good':rate>=40?'warn':'bad'],
@@ -1541,33 +1579,105 @@ function renderIssues(){
   fill($('issMgr'), [''].concat(managers().map(m=>m.name)));
   $('issMgr').options[0].text = 'All managers'; $('issMgr').options[0].value = '';
   const ts = terms('issSearch'), fm = $('issMgr').value, fs = $('issStat').value, fv = $('issSev').value;
+  const fst = $('issState').value, fo = $('issOut').value;
   let rows = all.slice().sort((a,b)=>String((b.date||'')+(b.time||'')).localeCompare(String((a.date||'')+(a.time||''))));
   if(fm) rows = rows.filter(i=>i.manager===fm);
+  if(fst) rows = rows.filter(i=>stateOf(i)===fst);
   if(fs) rows = rows.filter(i=>i.status===fs);
+  if(fo) rows = rows.filter(i=>i.outcome===fo);
   if(fv) rows = rows.filter(i=>i.severity===fv);
-  if(ts.length) rows = rows.filter(i=>hit(ts, hay(i.text,i.property,i.manager,i.reportedBy,i.category,i.cluster)));
-  tbl('issTbl', ['Reported','Property','Accountable','Issue','Category','Severity','Reply','Status',''],
+  if(ts.length) rows = rows.filter(i=>hit(ts, hay(i.text,i.property,i.manager,i.reportedBy,i.category,i.cluster,i.outcome,i.notes)));
+  tbl('issTbl', ['Reported','Property','Accountable','Issue','Severity','Reply','Open / closed',
+      'Stage','Outcome','Notes',''],
     rows.slice(0,400).map(function(i){
       const late = !i.responded && ageMs(i) > 864e5;
       const reply = i.responded
         ? `<span class="pill pill--good">${esc(i.responder||'replied')}</span><div class="muted">${mins(i.responseMins)}</div>`
         : late ? '<span class="pill pill--bad">No reply 24h+</span>' + (i.otherReplier?`<div class="muted">${esc(i.otherReplier)} replied</div>`:'')
         : '<span class="pill pill--warn">Awaiting</span>' + (i.otherReplier?`<div class="muted">${esc(i.otherReplier)} replied</div>`:'');
+      const st = stateOf(i);
+      const note = String(i.notes||'');
       return `<tr><td class="num" style="white-space:nowrap">${esc(i.date)}
           <div class="muted">${esc(i.time)} · ${esc(i.reportedBy)}</div></td>
-        <td>${esc(i.property)}</td><td class="strong">${esc(i.manager||'—')}</td>
-        <td style="max-width:340px">${esc(i.text)}</td><td>${esc(i.category)}</td>
+        <td>${esc(i.property)}<div class="muted">${esc(i.category||'')}</div></td>
+        <td class="strong">${esc(i.manager||'—')}</td>
+        <td style="max-width:300px">${esc(i.text)}</td>
         <td>${pill(i.severity)}</td><td>${reply}</td>
-        <td>${(canW('Issues')||ME.level===3)?sel('Issues',i.id,'status',['Open','Acknowledged','Resolved'],i.status):pill(i.status)}</td>
-        <td>${can(4)?rm('Issues',i.id):''}</td></tr>`;
+        <td><span class="pill pill--${st==='Closed'?'good':'warn'}">${esc(st)}</span></td>
+        <td>${st==='Closed'?'<span class="muted">—</span>':pill(i.status||'Open')}</td>
+        <td>${i.outcome?`<span class="pill pill--info">${esc(i.outcome)}</span>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" style="max-width:240px">${note ? esc(note.slice(0,110)) + (note.length>110?'…':'') : '—'}
+          ${i.updBy?`<div class="muted" style="font-size:11.5px">— ${esc(i.updBy)}</div>`:''}</td>
+        <td style="white-space:nowrap">${canIssue()?`<button class="mini mini--go" data-editiss="${i.id}">Update</button>`:''}
+          ${can(4)?rm('Issues',i.id):''}</td></tr>`;
     }), 'No issues match these filters in ' + monthLabel(curMonth) + '.');
 }
+/* Rows created before this change have no state column at all. Anything
+   already marked Resolved reads as Closed; everything else is Open. That
+   keeps the old records meaningful without a migration pass. */
+function stateOf(i){
+  if(i.state === 'Closed' || i.state === 'Open') return i.state;
+  return i.status === 'Resolved' ? 'Closed' : 'Open';
+}
+/* Managers update issues on their own properties — guardSave_ allows exactly
+   that, and they are the ones doing the resolving. */
+const canIssue = () => canW('Issues') || (ME && ME.level === 3);
+
+/* ---------- the issue update modal ---------- */
+const ISSUE_STAGES   = ['Open','Acknowledged','Escalated','In Progress','Resolved'];
+const ISSUE_OUTCOMES = ['Issue resolved','Relocated','Discount offered on future stay',
+                        'Compensation','Refunded'];
+let issFor = null;
+function issSync(){
+  /* Closed cases keep whatever stage they finished on, but there is nothing
+     left to move along, so the picker is put away. The outcome appears the
+     moment the work is resolved — that is the question the team is being
+     asked, and asking it earlier would only invite a guess. */
+  const closed = $('isState').value === 'Closed';
+  $('isStageWrap').classList.toggle('hidden', closed);
+  $('isOutWrap').classList.toggle('hidden', !(closed || $('isStage').value === 'Resolved'));
+}
+function openIssue(id){
+  const i = T('Issues').filter(x=>x.id===id)[0]; if(!i) return;
+  issFor = id;
+  $('mIssTitle').textContent = 'Update — ' + (i.property || 'unmatched property');
+  $('mIssSummary').innerHTML = `Reported ${esc(i.date)} ${esc(i.time||'')} by <b>${esc(i.reportedBy||'someone')}</b>` +
+    ` · ${esc(i.severity||'')} · accountable: <b>${esc(i.manager||'nobody')}</b><br>${esc(i.text||'')}`;
+  $('isErr').textContent = '';
+  $('isState').value = stateOf(i);
+  $('isStage').value = ISSUE_STAGES.indexOf(i.status) > -1 ? i.status : 'Open';
+  $('isOut').value   = ISSUE_OUTCOMES.indexOf(i.outcome) > -1 ? i.outcome : '';
+  $('isNotes').value = i.notes || '';
+  $('isWho').textContent = i.updBy ? 'Last updated by ' + i.updBy + (i.updAt ? ' on ' + i.updAt : '') + '.' : '';
+  issSync();
+  $('mIss').classList.remove('hidden');
+}
+$('isState').addEventListener('change', issSync);
+$('isStage').addEventListener('change', issSync);
+$('isCancel').onclick = () => { $('mIss').classList.add('hidden'); issFor = null; };
+$('isSave').onclick = async () => {
+  if(!issFor) return;
+  const orig = T('Issues').filter(x=>x.id===issFor)[0]; if(!orig) return;
+  const state = $('isState').value;
+  const stage = state === 'Closed' ? (orig.status || 'Resolved') : $('isStage').value;
+  const wantOut = state === 'Closed' || stage === 'Resolved';
+  if(wantOut && !$('isOut').value){
+    $('isErr').textContent = 'Pick how it was resolved before closing it.'; return;
+  }
+  const row = {}; for(const k in orig) row[k] = orig[k];
+  row.state = state;
+  row.status = stage;
+  row.outcome = wantOut ? $('isOut').value : '';
+  row.notes = $('isNotes').value.trim();
+  const ok = await save('Issues', row, 'Issue updated.');
+  if(ok){ $('mIss').classList.add('hidden'); issFor = null; }
+};
 document.addEventListener('click', e => {
   const tr = e.target.closest('#issTrend tr[data-month]'); if(!tr) return;
   curMonth = tr.dataset.month; renderMonthBar(); renderAll();
 });
 ['issSearch'].forEach(id=>$(id).addEventListener('input', ()=>renderIssues()));
-['issMgr','issStat','issSev'].forEach(id=>$(id).addEventListener('change', ()=>renderIssues()));
+['issMgr','issStat','issSev','issState','issOut'].forEach(id=>$(id).addEventListener('change', ()=>renderIssues()));
 
 /* ══════════ TASKS ══════════ */
 function renderTasks(){
@@ -2365,6 +2475,7 @@ document.addEventListener('click', e => {
   const r = e.target.closest('[data-refund]');  if(r) return openRefund(r.dataset.refund);
   const i = e.target.closest('[data-editinc]'); if(i) return openEdit('Income', i.dataset.editinc);
   const x = e.target.closest('[data-editexp]'); if(x) return openEdit('Expenses', x.dataset.editexp);
+  const s = e.target.closest('[data-editiss]'); if(s) return openIssue(s.dataset.editiss);
 });
 
 /* ══════════ EDIT MODAL ══════════ */
@@ -2446,7 +2557,7 @@ $('mEditSave').onclick = async () => {
   if(ok){ $('mEdit').classList.add('hidden'); editCtx = null; }
 };
 document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => {
-  if(e.target === m){ m.classList.add('hidden'); editCtx = null; refFor = null; } }));
+  if(e.target === m){ m.classList.add('hidden'); editCtx = null; refFor = null; issFor = null; } }));
 
 /* ══════════ OWNER & MANAGER REPORTS ══════════ */
 function renderReports(){
@@ -2545,16 +2656,18 @@ function ownerReport(oid){
     r.payChannel||'', r.reason||'', r.notes||'', r.by||'']));
   R.push([],['','','TOTAL', +tr.toFixed(2)]);
 
-  const IS = [['DATE','PROPERTY','ACCOUNTABLE','ISSUE','CATEGORY','SEVERITY','ANSWERED','REPLY MINS','STATUS']];
+  const IS = [['DATE','PROPERTY','ACCOUNTABLE','ISSUE','CATEGORY','SEVERITY','ANSWERED','REPLY MINS',
+    'OPEN / CLOSED','STAGE','OUTCOME','NOTES']];
   iss.sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(i=>IS.push([i.date,
     i.property, i.manager||'', i.text, i.category, i.severity, i.responded?'Yes':'No',
-    i.responseMins==null?'':i.responseMins, i.status]));
+    i.responseMins==null?'':i.responseMins, stateOf(i), i.status, i.outcome||'', i.notes||'']));
 
   saveBook([['Summary',S,[{wch:40},{wch:16}]],
     ['Bookings',I,[{wch:22},{wch:20},{wch:14},{wch:18},{wch:16},{wch:13},{wch:12},{wch:24},{wch:11},{wch:11},{wch:7},{wch:12},{wch:9},{wch:13},{wch:11},{wch:11},{wch:26}]],
     ['Expenses',E,[{wch:22},{wch:11},{wch:22},{wch:26},{wch:13},{wch:16},{wch:12},{wch:8},{wch:12},{wch:26}]],
     ['Refunds',R,[{wch:11},{wch:20},{wch:22},{wch:12},{wch:16},{wch:18},{wch:26},{wch:14}]],
-    ['Issues',IS,[{wch:11},{wch:22},{wch:16},{wch:60},{wch:18},{wch:11},{wch:10},{wch:11},{wch:14}]]],
+    ['Issues',IS,[{wch:11},{wch:22},{wch:16},{wch:60},{wch:18},{wch:11},{wch:10},{wch:11},{wch:14},
+      {wch:14},{wch:28},{wch:46}]]],
     safeName(o.name) + '_' + (curMonth==='all'?'all':curMonth) + '_Report.xlsx');
 }
 function managerReport(mid){
@@ -2602,10 +2715,11 @@ $('repPack').onclick = function(){
       r>=80?'Strong':r>=50?'Needs work':r>0?'Critical':'No response']);
   });
   const IS = [['DATE','TIME','CLUSTER','PROPERTY','ACCOUNTABLE','REPORTED BY','ISSUE','CATEGORY',
-    'SEVERITY','ANSWERED','RESPONDER','REPLY MINS','STATUS']];
+    'SEVERITY','ANSWERED','RESPONDER','REPLY MINS','OPEN / CLOSED','STAGE','OUTCOME','NOTES','UPDATED BY']];
   iss.slice().sort((a,b)=>String((a.date||'')+(a.time||'')).localeCompare(String((b.date||'')+(b.time||''))))
     .forEach(i=>IS.push([i.date,i.time,i.cluster,i.property,i.manager,i.reportedBy,i.text,i.category,
-      i.severity, i.responded?'Yes':'No', i.responder||'', i.responseMins==null?'':i.responseMins, i.status]));
+      i.severity, i.responded?'Yes':'No', i.responder||'', i.responseMins==null?'':i.responseMins,
+      stateOf(i), i.status, i.outcome||'', i.notes||'', i.updBy||'']));
   const MS = [['DATE','PERSON','MANAGER','AREA','SEVERITY','WHAT HAPPENED','IMPACT','ACTION']];
   T('Mistakes').filter(inM).forEach(m=>MS.push([m.date,m.emp,m.mgr,m.area,m.severity,m.detail,m.impact,m.action]));
   const PF = [['DATE','PERSON','AREA','RATING','NOTES','LOGGED BY']];
@@ -2624,7 +2738,8 @@ $('repPack').onclick = function(){
       PAY.push([k, by[k].base, by[k].bonus, by[k].ded, by[k].base+by[k].bonus-by[k].ded, by[k].cur]));
   }
   saveBook([['Scorecard',SC,[{wch:22},{wch:10},{wch:12},{wch:16},{wch:16},{wch:18},{wch:14}]],
-    ['Issue log',IS,[{wch:11},{wch:7},{wch:16},{wch:22},{wch:16},{wch:18},{wch:60},{wch:18},{wch:11},{wch:10},{wch:16},{wch:11},{wch:14}]],
+    ['Issue log',IS,[{wch:11},{wch:7},{wch:16},{wch:22},{wch:16},{wch:18},{wch:60},{wch:18},{wch:11},
+      {wch:10},{wch:16},{wch:11},{wch:14},{wch:14},{wch:28},{wch:46},{wch:16}]],
     ['Mistakes',MS,[{wch:11},{wch:18},{wch:16},{wch:18},{wch:11},{wch:50},{wch:18},{wch:24}]],
     ['Performance',PF,[{wch:11},{wch:18},{wch:22},{wch:14},{wch:44},{wch:16}]],
     ['Guest feedback',GF,[{wch:11},{wch:22},{wch:18},{wch:10},{wch:16},{wch:44},{wch:30}]],
@@ -2637,7 +2752,7 @@ $('repPack').onclick = function(){
 const EXPORT_COLS = {
   Tasks:['task','assignee','category','priority','due','dueT','status','note','assignedBy'],
   Issues:['date','time','cluster','property','manager','reportedBy','text','category','severity',
-          'responded','responder','responseMins','status'],
+          'responded','responder','responseMins','state','status','outcome','notes','updBy'],
   CheckDone:['date','emp','item','time'],
   ClockIns:['date','emp','role','time'],
   Performance:['date','emp','category','rating','note','by'],
@@ -2784,12 +2899,16 @@ function renderAll(){
     safely('guest feedback', renderGuest);
     safely('performance', renderPerf);
     safely('mistakes', renderMistakes);
+  }
+  /* The four money screens moved up to level 4 with the Revenue tab. Drawing
+     them for a manager would only ever produce empty tables now — the server
+     sends no rows — but it would also run fundStats and perOwner over nothing
+     on every poll, and leave four blank panels one URL away. */
+  if(can(4)){
     safely('bookings', renderBookings);
     safely('expenses', renderExpenses);
     safely('refunds', renderRefunds);
     safely('field funds', renderFunds);
-  }
-  if(can(4)){
     safely('incentives', renderIncentives);
     safely('reports', renderReports);
     safely('logins', renderLogins);
