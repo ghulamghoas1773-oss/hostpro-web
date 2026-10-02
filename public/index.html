@@ -452,7 +452,7 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
   });
   /* Nothing errored, but nothing appeared either. Just as useful to know. */
   setTimeout(function(){
-    var hiddenAll = ['gate','serverGate','app'].every(function(id){
+    var hiddenAll = ['gate','app'].every(function(id){
       var el = document.getElementById(id);
       return !el || el.classList.contains('hidden');
     });
@@ -464,21 +464,9 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
 })();
 </script>
 
-<!-- ══════════ SERVER LINK (only when the app is installed, not in Apps Script) ══════════ -->
-<div class="gate hidden" id="serverGate">
-  <div class="stars"></div><div class="orb"></div>
-  <div class="gate__card">
-    <span class="badge-duo"><span class="badge badge--accent">Setup</span><span>One time</span></span>
-    <h1>Connect to your workspace</h1>
-    <p class="lead">Paste the web app link from Apps Script. It ends in <b>/exec</b>. You only do this once on this device.</p>
-    <div class="f"><label for="srvUrl">Web app link</label>
-      <input id="srvUrl" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></div>
-    <div style="margin-top:18px"><button class="btn btn--primary" id="srvGo" style="width:100%">Connect</button></div>
-    <div class="err" id="srvErr"></div>
-  </div>
-</div>
-
-<!-- ══════════ SIGN IN ══════════ -->
+<!-- ══════════ SIGN IN ══════════
+     The workspace link is fixed in the script below (GS_EXEC_URL). There is
+     no screen anywhere in the app that asks for it or lets anyone change it. -->
 <div class="gate hidden" id="gate">
   <div class="stars"></div><div class="orb"></div>
   <div class="gate__card">
@@ -491,7 +479,6 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
       <input id="inPass" type="password" placeholder="Your password" autocomplete="current-password"></div>
     <div style="margin-top:20px"><button class="btn btn--primary" id="inGo" style="width:100%">Sign in</button></div>
     <div class="err" id="inErr"></div>
-    <div style="margin-top:16px;text-align:center"><button class="mini" id="srvChange">Change workspace link</button></div>
   </div>
 </div>
 
@@ -955,7 +942,6 @@ tr.grouped td{background:#0b0b0d;color:var(--accent);font-size:11.5px;text-trans
     <div class="head" style="margin-top:6px">
       <button class="btn btn--ghost btn--sm" id="btnBackup">Download a full backup</button>
       <button class="btn btn--ghost btn--sm" id="btnSlack">Pull Slack now</button>
-      <button class="btn btn--ghost btn--sm" id="btnServer">Change workspace link</button>
       <button class="btn btn--ghost btn--sm" id="btnDiag">Run diagnostics</button>
     </div>
     <pre id="diagOut" class="hidden" style="margin-top:16px;background:#0e0e10;border:1px solid var(--line-strong);
@@ -1061,23 +1047,25 @@ const canW = t => can(WRITE[t]||4);
    the /exec link. Sent as text/plain deliberately: that keeps it a simple
    request, so there is no CORS preflight to fail. */
 const HAS_GSR = (typeof google!=='undefined' && google.script && google.script.run);
-/* The workspace this app talks to. Baked in so no one on the team is ever
-   asked for a link — they open it and go straight to signing in. If you ever
-   redeploy to a different script, change it here. */
+/* THE workspace link. It is fixed here and nowhere else — no screen asks
+   for it and nobody can change it from inside the app. If you ever redeploy
+   to a different script, change it on this one line. */
 const GS_EXEC_URL = 'https://script.google.com/macros/s/AKfycbyC_sOt3Btj-8vnNIT2X_nTqUbm6x0QVkVC8t3GmwHdeOmrZOv8SBDdI03fpyDLklIJsg/exec';
 /* Where the app sends its API calls.
    Installed Android shell -> straight to Apps Script, because Capacitor
      makes the request natively and there is no origin to share.
    Anywhere else (Cloudflare, a laptop, an iPhone home screen) -> the
-     same-origin proxy at /api/exec, so no CORS question ever arises.
+     same-origin proxy at /api/exec, which forwards to GS_EXEC_URL, so no
+     CORS question ever arises.
    Served by Apps Script itself -> neither is used; google.script.run
      takes over and API_URL is ignored. */
 const IS_NATIVE_SHELL = !!(window.Capacitor && window.Capacitor.isNativePlatform
   && window.Capacitor.isNativePlatform());
 const BAKED_URL = IS_NATIVE_SHELL ? GS_EXEC_URL : '/api/exec';
-let API_URL = '';
-try{ API_URL = localStorage.getItem('hostpro_srv') || ''; }catch(e){}
-if(!API_URL && BAKED_URL) API_URL = BAKED_URL;
+/* Any link an older version saved on this device is wiped here, so it can
+   never override the fixed one. */
+try{ localStorage.removeItem('hostpro_srv'); }catch(e){}
+const API_URL = BAKED_URL;
 function call(fn){
   const args = [].slice.call(arguments,1);
   if(HAS_GSR) return new Promise((res,rej)=>{
@@ -1184,31 +1172,13 @@ async function del(table, id, confirmMsg){
   }catch(e){ toast('Not removed — no connection.', 6000); return false; }
 }
 
-/* ---------- gates ---------- */
+/* ---------- gates ----------
+   There are only two: the sign-in screen and the app itself. The old
+   "connect to your workspace" screen is gone. */
 function showGate(which){
-  ['serverGate','gate','app'].forEach(id=>$(id).classList.add('hidden'));
+  ['gate','app'].forEach(id=>$(id).classList.add('hidden'));
   $(which).classList.remove('hidden');
 }
-$('srvGo').onclick = async () => {
-  const u = $('srvUrl').value.trim();
-  if(!/^https:\/\/script\.google\.com\/.+\/exec$/.test(u)){
-    $('srvErr').textContent = 'That does not look like the web app link. It starts with https://script.google.com and ends in /exec.';
-    return;
-  }
-  $('srvErr').textContent = 'Checking the link…';
-  API_URL = u;
-  try{
-    const r = await fetch(u + '?ping=1');
-    const j = await r.json();
-    if(!j.ok) throw new Error('bad');
-    try{ localStorage.setItem('hostpro_srv', u); }catch(e){}
-    $('srvErr').textContent = '';
-    showGate('gate'); loadNames();
-  }catch(e){
-    $('srvErr').textContent = 'Could not reach that workspace. Check the link, and that the deployment is set to "Anyone".';
-  }
-};
-$('srvChange').onclick = () => { $('srvUrl').value = API_URL; showGate('serverGate'); };
 async function loadNames(){
   try{
     const r = await call('apiWhoCanSignIn');
@@ -2367,12 +2337,12 @@ function renderSettings(){
   $('tagCat').innerHTML  = tagRow('Categories', D.categories||[]);
   const installed = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
 
-  /* Only the primary account sees the workspace itself — the link, the
-     backup, the Slack pull and the diagnostics. */
+  /* Only the primary account sees the workspace itself — the backup, the
+     Slack pull and the diagnostics. */
   $('devPanel').classList.toggle('hidden', !can(PRIMARY));
   if(!can(PRIMARY)) return;
   $('devInfo').innerHTML = 'Signed in as <b>' + esc(ME.name) + '</b> (' + esc(ME.role) + '). ' +
-    (HAS_GSR ? 'Opened from Apps Script.' : 'Connected to ' + esc(API_URL.split('://').pop().slice(0,46)) + '…') +
+    (HAS_GSR ? 'Opened from Apps Script.' : 'Connected to the HostPro workspace.') +
     (installed ? ' Running as an installed app.' : ' Not installed yet — use your browser menu, then “Add to Home Screen” or “Install”.');
 }
 document.addEventListener('click', async e => {
@@ -2444,7 +2414,6 @@ $('btnCopyDiag').onclick = function(){
   else toast('Select the text above and copy it.');
 };
 $('btnOut').onclick = () => signOut();
-$('btnServer').onclick = () => { $('srvUrl').value = API_URL; showGate('serverGate'); };
 $('btnSlack').onclick = async () => {
   toast('Asking Slack for anything new — this can take a minute.');
   try{
@@ -2969,12 +2938,12 @@ window.addEventListener('error', function(e){
       const box = $('dashAlerts');
       if(box && !c) box.innerHTML = '<div class="note note--bad"><b>Could not reach the workspace.</b><br>' +
         esc((err && err.message) || err) +
-        '<br><br>If this is the installed app, check the link under Settings. If this is the Apps Script ' +
+        '<br><br>Check your internet connection and try again. If this is the Apps Script ' +
         'page, redeploy: Deploy ▸ Manage deployments ▸ pencil ▸ New version.</div>';
     });
   }
-  if(!HAS_GSR && !API_URL){ showGate('serverGate'); }
-  else start();
+  /* The workspace link is baked in, so there is nothing to ask for. */
+  start();
 
   setInterval(poll, 12000);
   document.addEventListener('visibilitychange', () => { if(!document.hidden) poll(); });
